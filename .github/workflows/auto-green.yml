@@ -1,0 +1,90 @@
+name: Auto Green Contributions
+
+on:
+  schedule:
+    - cron: '37 14 * * *'
+  workflow_dispatch:
+    inputs:
+      skip_percentage:
+        description: 'Percentage chance to skip the day (0-100). Lower = more green.'
+        required: true
+        default: '25'
+      max_commits:
+        description: 'Maximum commits per active day (1-4).'
+        required: true
+        default: '3'
+
+jobs:
+  auto-green:
+    runs-on: ubuntu-latest
+    concurrency: 
+      group: auto-green-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Ensure base files exist
+        run: |
+          if [ ! -f "README.md" ]; then
+            echo "# Auto Green" > README.md
+            git add README.md
+            git commit -m "chore: initial commit" || true
+          fi
+          touch contributions.log
+          git add contributions.log
+          git commit -m "chore: init log" || true
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Generate Realistic Contributions
+        env:
+          SKIP_PERCENTAGE: ${{ github.event.inputs.skip_percentage || '25' }}
+          MAX_COMMITS: ${{ github.event.inputs.max_commits || '3' }}
+        run: |
+          ROLL=$((RANDOM % 100))
+          if [ "$ROLL" -lt "$SKIP_PERCENTAGE" ]; then
+            echo "🛌 Skipping today's contributions (Simulating a break/weekend)."
+            exit 0
+          fi
+
+          echo "💻 Active day! Generating contributions..."
+
+          MESSAGES=(
+            "docs: update daily notes"
+            "refactor: clean up structure"
+            "chore: daily sync"
+            "feat: add minor improvements"
+            "fix: resolve small edge case"
+            "style: format code"
+            "test: add missing test cases"
+            "perf: optimize minor routine"
+            "ci: update workflow configs"
+            "build: bump dependencies"
+          )
+
+          COMMITS_TODAY=$(( (RANDOM % MAX_COMMITS) + 1 ))
+          echo "📝 Planning $COMMITS_TODAY commits for today."
+
+          for (( i=1; i<=COMMITS_TODAY; i++ )); do
+            JITTER=$(( (RANDOM % 2700) + 60 )) 
+            echo "⏳ Waiting $JITTER seconds before commit $i/$COMMITS_TODAY..."
+            sleep $JITTER
+
+            echo "$(date -u +"%Y-%m-%d %H:%M:%S UTC") - Contribution $i" >> contributions.log
+
+            MSG_INDEX=$((RANDOM % ${#MESSAGES[@]}))
+            MSG="${MESSAGES[$MSG_INDEX]}"
+
+            git add contributions.log
+            git commit -m "$MSG"
+          done
+
+          echo "🚀 Pushing commits to remote..."
+          git push
