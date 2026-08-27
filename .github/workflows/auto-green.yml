@@ -2,89 +2,88 @@ name: Auto Green Contributions
 
 on:
   schedule:
-    - cron: '37 14 * * *'
+    # Runs every day at 8:07 PM IST (14:37 UTC)
+    - cron: "37 14 * * *"
+
   workflow_dispatch:
     inputs:
       skip_percentage:
-        description: 'Percentage chance to skip the day (0-100). Lower = more green.'
-        required: true
-        default: '25'
-      max_commits:
-        description: 'Maximum commits per active day (1-4).'
-        required: true
-        default: '3'
+        description: "Chance of skipping today's contribution (0-100)"
+        required: false
+        default: "10"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-green-main
+  cancel-in-progress: true
 
 jobs:
   auto-green:
+    name: Create Daily Contribution
     runs-on: ubuntu-latest
-    concurrency: 
-      group: auto-green-${{ github.ref }}
-      cancel-in-progress: true
+
+    timeout-minutes: 5
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-
-      - name: Ensure base files exist
-        run: |
-          if [ ! -f "README.md" ]; then
-            echo "# Auto Green" > README.md
-            git add README.md
-            git commit -m "chore: initial commit" || true
-          fi
-          touch contributions.log
-          git add contributions.log
-          git commit -m "chore: init log" || true
+          fetch-depth: 0
 
       - name: Configure Git
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Generate Realistic Contributions
+      - name: Generate daily contribution
         env:
-          SKIP_PERCENTAGE: ${{ github.event.inputs.skip_percentage || '25' }}
-          MAX_COMMITS: ${{ github.event.inputs.max_commits || '3' }}
+          SKIP_PERCENTAGE: ${{ github.event.inputs.skip_percentage || '10' }}
+        shell: bash
         run: |
+          set -euo pipefail
+
+          # Validate skip percentage
+          if ! [[ "$SKIP_PERCENTAGE" =~ ^[0-9]+$ ]] || [ "$SKIP_PERCENTAGE" -gt 100 ]; then
+            echo "Invalid SKIP_PERCENTAGE: $SKIP_PERCENTAGE"
+            exit 1
+          fi
+
+          # Randomly skip some days
           ROLL=$((RANDOM % 100))
+
           if [ "$ROLL" -lt "$SKIP_PERCENTAGE" ]; then
-            echo "🛌 Skipping today's contributions (Simulating a break/weekend)."
+            echo "Skipping today's contribution."
             exit 0
           fi
 
-          echo "💻 Active day! Generating contributions..."
+          echo "Generating today's contribution..."
 
-          MESSAGES=(
-            "docs: update daily notes"
-            "refactor: clean up structure"
-            "chore: daily sync"
-            "feat: add minor improvements"
-            "fix: resolve small edge case"
-            "style: format code"
-            "test: add missing test cases"
-            "perf: optimize minor routine"
-            "ci: update workflow configs"
-            "build: bump dependencies"
-          )
+          # Use UTC date for a stable daily record
+          DATE="$(date -u '+%Y-%m-%d')"
+          TIME="$(date -u '+%H:%M:%S UTC')"
 
-          COMMITS_TODAY=$(( (RANDOM % MAX_COMMITS) + 1 ))
-          echo "📝 Planning $COMMITS_TODAY commits for today."
+          # Prevent duplicate contribution entries for the same day
+          if grep -q "^$DATE|" contributions.log 2>/dev/null; then
+            echo "A contribution already exists for $DATE."
+            exit 0
+          fi
 
-          for (( i=1; i<=COMMITS_TODAY; i++ )); do
-            JITTER=$(( (RANDOM % 2700) + 60 )) 
-            echo "⏳ Waiting $JITTER seconds before commit $i/$COMMITS_TODAY..."
-            sleep $JITTER
+          # Add exactly one meaningful daily record
+          echo "$DATE|Daily development activity recorded at $TIME" >> contributions.log
 
-            echo "$(date -u +"%Y-%m-%d %H:%M:%S UTC") - Contribution $i" >> contributions.log
+          git add contributions.log
 
-            MSG_INDEX=$((RANDOM % ${#MESSAGES[@]}))
-            MSG="${MESSAGES[$MSG_INDEX]}"
+          # Nothing changed
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
 
-            git add contributions.log
-            git commit -m "$MSG"
-          done
+          git commit -m "chore: update daily activity"
 
-          echo "🚀 Pushing commits to remote..."
-          git push
+      - name: Push changes
+        run: |
+          git push origin HEAD:main
